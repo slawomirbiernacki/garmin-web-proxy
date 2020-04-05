@@ -5,83 +5,93 @@ import android.util.Log
 import com.garmin.android.connectiq.ConnectIQ
 import com.garmin.android.connectiq.IQApp
 import com.garmin.android.connectiq.IQDevice
+import com.slawomirbiernacki.garminwebproxy.messagehandler.GarminMessageHandler
 
-class GarminConnection(private val context: Context) {
+class GarminConnection(
+    context: Context,
+    private val messageHandler: GarminMessageHandler
+) {
+    var appID = "def6540badbe454d9e610c11e36ed476"  //TODO handle multiple apps
+    private var connectIQ: ConnectIQ = ConnectIQ.getInstance(
+        context,
+        ConnectIQ.IQConnectType.WIRELESS
+    )
 
     init {
-        connect()
+        connectIQ.initialize(context, true, getSDKListener())
     }
 
-    private fun connect() {
-        val connectIQ = ConnectIQ.getInstance(
-            context,
-            ConnectIQ.IQConnectType.WIRELESS
-        )
-        connectIQ.initialize(context, true, getSDKListener(connectIQ))
-
-    }
-
-    fun getSDKListener(connectIQ: ConnectIQ): ConnectIQ.ConnectIQListener {
+    private fun getSDKListener(): ConnectIQ.ConnectIQListener {
         return object : ConnectIQ.ConnectIQListener {
             override fun onSdkReady() {
-                Log.d(TAG, "Garmin SDK ready")
-                val paired: List<IQDevice>? = connectIQ.knownDevices
+                Log.i(TAG, "Garmin SDK ready")
+                val pairedDevices: List<IQDevice> = connectIQ.knownDevices
 
-                if (paired != null && paired.isNotEmpty()) { // get the status of the devices
-                    for (device in paired) { //handle multiple devices
-                        val status: IQDevice.IQDeviceStatus = connectIQ.getDeviceStatus(device)
-                        println("Found paired device: ${device.friendlyName}")
-                        if (status == IQDevice.IQDeviceStatus.CONNECTED) { // Work with the device
-                            println("Found connected device: ${device.friendlyName}")
-                            testApp(connectIQ, device)
-                        }
+                if (pairedDevices.isEmpty()) {
+                    Log.w(TAG, "No paired devices found")
+                    return
+                }
+
+                for (device in pairedDevices) { //TODO handle multiple devices
+                    val status: IQDevice.IQDeviceStatus = connectIQ.getDeviceStatus(device)
+                    Log.d(TAG, "Found paired device: ${device.friendlyName}, status: $status")
+
+                    if (status != IQDevice.IQDeviceStatus.CONNECTED) {
+                        Log.w(TAG, "Device ${device.friendlyName} not connected, status: $status")
+                        return
                     }
-//                    println("No paired")
-                } else {
-                    println("No paired devices")
+
+                    registerForMessages(connectIQ, device, appID)
                 }
             }
 
             override fun onInitializeError(status: ConnectIQ.IQSdkErrorStatus) {
-                println("Garmin connect error $status")
+                Log.e(TAG, "Garmin connect error $status")
             }
 
             override fun onSdkShutDown() {
-                println("Garmin connect shutdown")
+                Log.d(TAG, "Garmin connect shutdown")
             }
         }
     }
 
-    fun testApp(connectIQ: ConnectIQ, iqdevice: IQDevice) {
+    fun registerForMessages(connectIQ: ConnectIQ, iqdevice: IQDevice, applicationID: String) {
 
-        val listener = object : ConnectIQ.IQApplicationInfoListener {
+        val appInfoListener = object : ConnectIQ.IQApplicationInfoListener {
             override fun onApplicationInfoReceived(iqapp: IQApp) {
-                println("Found application: " + iqapp.applicationId)
+                Log.i(TAG, "Found application: ${iqapp.applicationId}")
 
-
-                val appEventsListener =
-                    ConnectIQ.IQApplicationEventListener { device, app, message, status ->
-                        println("Message $status: $message")
-
-                        connectIQ.sendMessage(
-                            iqdevice,
-                            iqapp,
-                            "pong"
-                        ) { iqDevice, iqApp, iqMessageStatus ->
-                            println("Responded! $iqMessageStatus")
-                        }
+                connectIQ.registerForAppEvents(iqdevice, iqapp) { device, app, message, status ->
+                    Log.d(
+                        TAG,
+                        "Message received, device: $device, app: ${app.applicationId}, status $status"
+                    )
+                    if (status == ConnectIQ.IQMessageStatus.SUCCESS) {
+                        val response = messageHandler.handleMessage(message)
+                        respond(response, device, app)
+                    } else {
+                        Log.w(TAG, "Message fetch unsuccessful, status: $status")
                     }
-
-                connectIQ.registerForAppEvents(iqdevice, iqapp, appEventsListener)
+                }
             }
 
             override fun onApplicationNotInstalled(p0: String) {
-                println("Not installed")
+                Log.w(TAG, "Application not installed")
             }
-
         }
+        connectIQ.getApplicationInfo(applicationID, iqdevice, appInfoListener)
+    }
 
-
-        connectIQ.getApplicationInfo("def6540badbe454d9e610c11e36ed476", iqdevice, listener)
+    private fun respond(message: Any, device: IQDevice, app: IQApp) {
+        connectIQ.sendMessage(
+            device,
+            app,
+            message
+        ) { iqDevice, iqApp, iqMessageStatus ->
+            Log.i(
+                TAG,
+                "Responded to device ${iqDevice.friendlyName} and app: ${iqApp.displayName} with status: $iqMessageStatus"
+            ) //TODO retry failures
+        }
     }
 }
