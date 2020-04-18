@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">Garmin Web Proxy</string>
+    <string name="application_id">Application id</string>
+    <string name="register_app_button_text">Register</string>
+
+
+
+    <string name="preference_file_key">com.slawomirbiernacki.garminwebproxy.PREFERENCE_FILE_KEY</string>
 </resources>

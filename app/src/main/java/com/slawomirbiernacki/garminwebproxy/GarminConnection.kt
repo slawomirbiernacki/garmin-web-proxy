@@ -17,6 +17,8 @@ class GarminConnection(
         ConnectIQ.IQConnectType.WIRELESS
     )
 
+    //TODO handle missing garmin connect app
+
     init {
         connectIQ.initialize(context, true, getSDKListener())
     }
